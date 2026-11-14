@@ -1,9 +1,9 @@
 import "server-only";
-import type { AuthEmailSender } from "@clubedge/auth-better-auth";
+import type { AuthEmailSender } from "@clubedge/auth";
 import { email } from "@/server/email";
 
 /**
- * How Better Auth sends verification and password reset emails: through the email module, or
+ * How the auth provider sends verification and password reset emails (Better Auth, Firebase): through the email module, or
  * not at all without one, which turns both features off.
  */
 export function authEmailSender(): AuthEmailSender | undefined {

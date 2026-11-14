@@ -3,11 +3,11 @@
 ## Generated from
 
 - Starter repository: `Clubedge/clubedge-starter`
-- Starter ref: `v0.16.0`
-- Starter commit: `e233aa68ddc8c21df6cf2b01b9e26876d2e4aeca`
+- Starter ref: `v0.32.0`
+- Starter commit: `ff2f60ac8ae2812f2df7001afc7eae0bb53324f6`
 - Framework: Next.js
-- Modules: Authentication: Better Auth, File storage: S3-compatible, Cache and rate limits: Redis, or memory without REDIS_URL, Email: SMTP (any provider, or a local inbox), Payments: None, Background jobs: None, Observability: None, Local infrastructure: No Docker (PGlite and a local folder), Deployment: Railway
-- CLI version: `0.24.0`
+- Modules: Authentication: Better Auth, File storage: S3-compatible, Cache and rate limits: Redis, or memory without REDIS_URL, Email: SMTP (any provider, or a local inbox), Payments: None, Background jobs: None, Observability: None, Push notifications: None, Over-the-air updates: None, Local infrastructure: No Docker (PGlite and a local folder), Deployment: Railway
+- CLI version: `0.49.1`
 
 ## Features
 
@@ -32,7 +32,7 @@
 
 - A production image that includes its own migrator (`node /app/migrate.mjs`), for running migrations before each release.
 - A manual deploy workflow for the chosen platform, and a readiness endpoint (`/api/ready`) that checks the database.
-- Deployment to Railway with `railway.json`: migrations run before each deploy.
+- Deployment to Railway with `.railway/railway.ts`: migrations run before each release, and `pnpm clubedge deploy` sets up the project.
 
 **Quality**
 
@@ -123,7 +123,7 @@ Run these from the repository root:
 | `pnpm db:check`     | Check migration consistency.                   |
 | `pnpm db:seed`      | Seed the configured database.                  |
 
-Playwright's first run may require installing Chromium with `pnpm exec playwright install chromium`. CI runs the browser checks automatically.
+The browser checks run in Chromium, Firefox, and WebKit. Install the engines once with `pnpm exec playwright install chromium firefox webkit`, or run one engine with `pnpm test:e2e --project=chromium`. CI runs the browser checks automatically.
 
 Local services:
 
@@ -143,6 +143,8 @@ Change the project later:
 - `pnpm clubedge upgrade`: move the project to the newest Starter release. It first lists the releases in between.
 
 These commands merge the change into your code instead of overwriting it: files you never touched are updated, your edits are kept, and lines you both changed get conflict markers, listed per file afterward. Commit first, because they need a clean Git tree so that `git diff` shows the result. Add `--dry-run` to preview a change.
+
+What an upgrade promises, how ready each module option is, and how an option is retired: [Stability and compatibility](https://github.com/Clubedge/clubedge-starter/blob/main/STABILITY.md).
 
 ## Documentation
 

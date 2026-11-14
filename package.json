@@ -10,9 +10,9 @@
   "scripts": {
     "dev": "turbo run dev --filter=@clubedge/web --filter=@clubedge/local-db",
     "build": "turbo run build",
-    "start": "pnpm --filter @clubedge/web start",
-    "lint": "eslint .",
-    "typecheck": "turbo run typecheck",
+    "start": "turbo run start --env-mode=loose --filter=@clubedge/web",
+    "lint": "eslint . && turbo run lint",
+    "typecheck": "turbo run typecheck && pnpm run --if-present typecheck:e2e",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:generate": "pnpm -r --if-present run db:generate",
@@ -21,14 +21,16 @@
     "db:studio": "pnpm --filter @clubedge/db db:studio",
     "db:check": "pnpm -r --if-present run db:check",
     "db:seed": "pnpm --filter @clubedge/db db:seed",
-    "test": "vitest run",
+    "test": "vitest run && turbo run test",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "docker:dev": "docker compose up --build",
+    "typecheck:e2e": "tsc -p e2e",
+    "docker:dev": "docker compose -f docker-compose.yml up --build",
     "docker:build": "docker build -t upgrade-test .",
     "docker:start": "docker run --rm -p 3000:3000 --env-file apps/web/.env.local upgrade-test",
     "check:services": "pnpm --filter @clubedge/web check:services",
+    "check:env": "pnpm --filter @clubedge/web check:env",
     "clubedge": "pnpm dlx @clubedge/create-clubedge-app@latest",
     "infra:up": "pnpm --filter @clubedge/local-db dev",
     "infra:reset": "node -e \"require('node:fs').rmSync('.data', { recursive: true, force: true })\""
@@ -46,14 +48,20 @@
   },
   "pnpm": {
     "overrides": {
-      "esbuild": "^0.25.0"
+      "@grpc/grpc-js": "^1.13.6",
+      "esbuild": "^0.25.0",
+      "fast-xml-parser": "^5.10.1",
+      "node-forge@<1.4.1": "^1.4.1",
+      "systeminformation@<5.33.16": "^5.33.16",
+      "undici@>=6.23.0 <6.29.1": "^6.29.1",
+      "uuid@<11.1.1": "^11.1.1"
     }
   },
   "clubedge": {
-    "cliVersion": "0.24.0",
+    "cliVersion": "0.49.1",
     "starterRepository": "Clubedge/clubedge-starter",
-    "starterRef": "v0.16.0",
-    "starterCommit": "e233aa68ddc8c21df6cf2b01b9e26876d2e4aeca",
+    "starterRef": "v0.32.0",
+    "starterCommit": "ff2f60ac8ae2812f2df7001afc7eae0bb53324f6",
     "framework": "next",
     "modules": {
       "auth": "better-auth",
@@ -63,6 +71,8 @@
       "payments": "none",
       "jobs": "none",
       "observability": "none",
+      "push": "none",
+      "ota": "none",
       "infra": "local",
       "deploy": "railway"
     }

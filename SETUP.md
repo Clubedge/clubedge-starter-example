@@ -112,6 +112,8 @@ The app sends email through the `EmailProvider` in `apps/web/src/server/email.ts
 
 Set `SMTP_URL` to any SMTP server, for example `smtps://user:password@smtp.example.com:465`, and `EMAIL_FROM` to the sender, as `Name <address>` or an address. Most email providers (Resend, Postmark, Amazon SES, SendGrid, Mailgun) offer an SMTP endpoint.
 
+A send gives up after 10 seconds without a connection or the server's greeting, and after 20 seconds of silence in the middle, so a host that blocks SMTP's ports fails at once. Some hosts' free plans block ports 25, 465 and 587: use the provider's port 2525 there. To wait longer, say so in the URL, as `?connectionTimeout=30000` (in milliseconds; `greetingTimeout` and `socketTimeout` too).
+
 Without a provider configured, development prints each email to the server log, so you can open links from the terminal, and production refuses to send. `pnpm check:services` confirms that the provider accepts the settings without sending anything.
 
 ## File storage
@@ -119,6 +121,36 @@ Without a provider configured, development prints each email to the server log, 
 The storage adapter works with AWS S3 and S3-compatible providers such as Cloudflare R2 and MinIO. Configure `STORAGE_BUCKET`, `STORAGE_REGION`, `STORAGE_ENDPOINT` when required, and the access key, secret, and optional public URL. For R2, use the account's S3 API endpoint and region `auto`.
 
 The storage adapter does not authorize users or validate uploads. Before calling it, the route must check ownership and authorization, file size, content type, and the object key. Keep credentials server side.
+
+### Serving part of a file
+
+Browsers ask for audio and video in parts, with a `Range` header, so a player can seek without downloading the whole file, and Safari plays no media from a route that ignores the header. `download` takes the part to read as its `range` option, and `parseByteRange` reads a `Range` header into one. It needs the file's size, which the storage adapter does not report: save the size with the file's key and type when the file is uploaded, where the route checks them. A route then answers with the whole file or the part asked for:
+
+```ts
+import { parseByteRange, storage } from "@/server/storage";
+
+export async function fileResponse(
+  request: Request,
+  file: { key: string; type: string; size: number },
+): Promise<Response> {
+  const headers = new Headers({ "Accept-Ranges": "bytes" });
+  const range = parseByteRange(request.headers.get("range"), file.size);
+  if (range === "unsatisfiable") {
+    headers.set("Content-Range", `bytes */${file.size}`);
+    return new Response(null, { status: 416, headers });
+  }
+  const body = await storage.download(file.key, range ? { range } : undefined);
+  const { start, end } = range ?? { start: 0, end: file.size - 1 };
+  headers.set("Content-Type", file.type);
+  headers.set("Content-Length", String(end - start + 1));
+  if (range) headers.set("Content-Range", `bytes ${start}-${end}/${file.size}`);
+  return new Response(body, { status: range ? 206 : 200, headers });
+}
+```
+
+Call it from a route handler with the request and your record of the file, once the route has checked that the user may read it.
+
+A range that starts past the file's end gets `416`. A header that asks for several ranges, or is not valid, gets the whole file, as HTTP allows. Send a file under its own type only when the upload route allows that type: a stored HTML or SVG file served as such runs as a page of your site, so send any other file as `application/octet-stream` with `Content-Disposition: attachment`.
 
 ## Shared UI development
 
@@ -161,7 +193,9 @@ Run it before a new version starts serving; it skips migrations that are already
 
 ## Deploy
 
-`railway.json` deploys the production image to [Railway](https://railway.com): create a project from this repository, add the production variables listed below to the service, and deploy. Railway runs `node /app/migrate.mjs` as the pre-deploy command, so a failed migration stops the release, and checks `/api/health` before switching traffic.
+`.railway/railway.ts` is the service's configuration on [Railway](https://railway.com), as code: Railway builds the root `Dockerfile`, runs `node /app/migrate.mjs` before each release, so a failed migration stops it, and checks `/api/health` before switching traffic.
+
+The quickest first deploy is `pnpm clubedge deploy`: it creates the project, Postgres, the service, its domain and variables, applies `.railway/railway.ts`, and deploys. To deploy another way, add Railway's TypeScript SDK with `pnpm add -D -w railway`, run `railway config apply` once (Railway CLI 5.42.1 or newer), and add the production variables listed below to the service. The file names the service after the package; if yours has another name, change it there.
 
 `.github/workflows/deploy.yml` deploys on demand: in GitHub, open Actions, then Deploy, then Run workflow.
 
@@ -172,11 +206,35 @@ Run it before a new version starts serving; it skips migrations that are already
 Production needs these variables:
 
 - `DATABASE_URL`, pointing at a managed PostgreSQL database.
-- `NEXT_PUBLIC_APP_URL`, the deployed origin.
+- `NEXT_PUBLIC_APP_URL`, the deployed origin. Next.js compiles it into the build, server code included (sign-in links, Stripe return URLs), so it must be set when the image is built: Railway and Render pass the service's variable to the Docker build; on Fly.io set it under `[build.args]` in `fly.toml`; with the Docker workflow, set the repository variable `NEXT_PUBLIC_APP_URL`.
 - `BETTER_AUTH_SECRET`, at least 32 random characters, different from development.
 - `SMTP_URL` and `EMAIL_FROM`; without them, production refuses to send email.
 - `REDIS_URL`, when you run more than one instance.
 - The `STORAGE_*` variables for your S3-compatible bucket.
+- `CLIENT_IP_HEADER` or `TRUSTED_PROXY_HOPS`, for where the app runs: see [Client addresses](#client-addresses).
+
+### Client addresses
+
+Rate limits count requests per client address, so the server must know which address a request comes from. That depends on what sits in front of it, which two settings describe:
+
+- `CLIENT_IP_HEADER`: a header your host sets to the client's address, replacing any copy the client sends. The address is that header's value.
+- `TRUSTED_PROXY_HOPS`: how many reverse proxies you run in front of the server that append to `X-Forwarded-For`, such as Caddy, nginx, Traefik, or a load balancer. The address is the entry that many places from the end, the one your outermost proxy added; entries before it are whatever the client sent, so they never count.
+
+`CLIENT_IP_HEADER` wins when both are set. Without either, or when a request lacks what they name, the address is the connection's own, which is right for a server that clients reach directly. A value that cannot be right stops the server at startup, and `pnpm check:env` reports it.
+
+Next.js gives the app no connection address, so without either setting the address is the last `X-Forwarded-For` entry, the one the proxy nearest the app added: right on Vercel, which replaces the header with the client's address, and behind one proxy you run. Set your host's setting from the table anyway, since some hosts add more than one entry.
+
+| Where the app runs                    | Setting                                             |
+| ------------------------------------- | --------------------------------------------------- |
+| Railway                               | `CLIENT_IP_HEADER=x-real-ip`                        |
+| Render                                | `CLIENT_IP_HEADER=cf-connecting-ip` (`render.yaml`) |
+| Fly.io                                | `CLIENT_IP_HEADER=fly-client-ip` (`fly.toml`)       |
+| Vercel                                | `CLIENT_IP_HEADER=x-real-ip`                        |
+| Netlify                               | `CLIENT_IP_HEADER=x-nf-client-connection-ip`        |
+| Behind proxies you run (Caddy, nginx) | `TRUSTED_PROXY_HOPS=1`, or the number of proxies    |
+| Reached by clients directly           | Neither                                             |
+
+Vercel and Netlify take runtime variables only from the project's settings, not from `vercel.json` or `netlify.toml`, so set `CLIENT_IP_HEADER` there with the others.
 
 ## Checks
 
@@ -192,10 +250,10 @@ pnpm format:check
 pnpm build
 ```
 
-Browser checks use Playwright. Install Chromium once, then run `pnpm test:e2e`:
+Browser checks use Playwright, and run in each engine visitors use (`playwright.config.ts`): `chromium` (Chrome, Edge, and Android's browsers), `firefox`, and `webkit` (Safari, and every browser on an iPhone). Install the engines once, then run `pnpm test:e2e`, or one engine with `pnpm test:e2e --project=chromium`:
 
 ```sh
-pnpm exec playwright install chromium
+pnpm exec playwright install chromium firefox webkit
 pnpm test:e2e
 ```
 
@@ -209,7 +267,7 @@ This project is a starting point; review the security and operational choices fo
 - Make authenticated server routes call `getCurrentUser()` or `requireUser()` from `@/server/auth` (the latter throws a 401 `AppError`), and protect pages with `getPageUser`, which redirects signed-out visitors to `/login`. Do not treat cookie contents alone as proof of identity.
 - Authorize storage access and validate upload size, content type, and object ownership in the route before using the storage adapter.
 - Configure Redis for rate limiting when you deploy more than one instance; the in-memory fallback does not share counts between instances.
-- Client addresses come from `x-forwarded-for`, so deploy behind a proxy that sets it.
+- Tell the server where each client's address is for your host, with `CLIENT_IP_HEADER` or `TRUSTED_PROXY_HOPS`, so rate limits count each client on its own: see [Client addresses](#client-addresses).
 - Configure and verify a restrictive Content Security Policy for the scripts and asset origins used by your deployment. A generic policy is not included because it can break framework tooling and project-specific assets.
 - Review database migration and backup procedures, provider access policies, and application-specific error handling.
 
@@ -218,5 +276,5 @@ This project is a starting point; review the security and operational choices fo
 - **Environment validation fails:** confirm you copied the example to `apps/web/.env.local` and set `DATABASE_URL`. The error names the module whose variables are invalid.
 - **Database connection fails:** check the URL, network access, and whether your provider expects a transaction pooler. Keep `prepare: false` for the current Supabase pooler setup.
 - **Redis cannot connect:** check that the URL uses `redis://` or `rediss://`, credentials are current, and outbound TCP access is allowed.
-- **Playwright cannot find Chromium:** run `pnpm exec playwright install chromium`.
+- **Playwright cannot find a browser:** run `pnpm exec playwright install chromium firefox webkit`. On Linux they also need system libraries: add `--with-deps`.
 - **A package file appears missing after an offline install:** retry with a normal registry-backed `pnpm install`; an incomplete local package cache can satisfy offline resolution while leaving package contents incomplete.

@@ -1,6 +1,6 @@
 {
   "name": "@clubedge/cache-redis",
-  "version": "0.16.0",
+  "version": "0.32.0",
   "description": "Redis rate limiter and cache for @clubedge/cache.",
   "private": true,
   "license": "Apache-2.0",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@clubedge/cache": "workspace:*",
-    "redis": "^5.8.0"
+    "redis": "^6.3.1"
   },
   "devDependencies": {
     "typescript": "^5.9.2"
