@@ -8,15 +8,21 @@ FROM base AS pruner
 COPY . .
 RUN pnpm dlx turbo@^2.5.0 prune @clubedge/web --docker
 
-FROM base AS deps
-COPY --from=pruner /app/out/json/ .
-RUN pnpm install --frozen-lockfile
-
+# Install in the stage that builds: copying node_modules from a separate install stage (many
+# small files) took minutes on some builders, and timed out a Railway build. The manifests come
+# first, so the install layer is still cached until a dependency changes.
 FROM base AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
-COPY --from=deps /app/ .
+COPY --from=pruner /app/out/json/ .
+RUN pnpm install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
 COPY tsconfig.base.json ./
+# Next.js compiles NEXT_PUBLIC_* values into the build, server code included (sign-in email links,
+# Stripe return URLs), so the public URL is a build argument. Railway and Render pass it from the
+# service's variables; elsewhere, --build-arg NEXT_PUBLIC_APP_URL=https://your.domain. Unset, the
+# app falls back to http://localhost:3000.
+ARG NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 RUN pnpm build
 # The production migrator (node /app/migrate.mjs): one bundled file plus every package's
 # migrations, so release commands can migrate before a new version starts.
